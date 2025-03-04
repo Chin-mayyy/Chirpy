@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Chin-mayyy/Chirpy/internal/auth"
 	"github.com/Chin-mayyy/Chirpy/internal/database"
 	"github.com/google/uuid"
 )
@@ -20,8 +21,7 @@ type Chirp struct {
 
 func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request) {
 	type parameter struct {
-		Body   string    `json:"body"`
-		UserID uuid.UUID `json:"user_id"`
+		Body string `json:"body"`
 	}
 
 	params := parameter{}
@@ -34,6 +34,19 @@ func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, 400, "Something went wrong")
 	}
 
+	//Authenticating the user
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "Error getting the header")
+		return
+	}
+
+	ID, err := auth.ValidateJWT(token, cfg.JWTsecret)
+	if err != nil {
+		respondWithError(w, 401, "Unauthorized")
+		return
+	}
+
 	//Checking the length of chirps
 	if len(params.Body) >= 140 {
 		respondWithError(w, 400, "Chirp is too long")
@@ -42,10 +55,11 @@ func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request)
 
 		chirp, err := cfg.db.CreateChirp(r.Context(), database.CreateChirpParams{
 			Body:   newBody,
-			UserID: params.UserID,
+			UserID: ID,
 		})
 		if err != nil {
 			respondWithError(w, 400, "Error creating a chirp")
+			return
 		}
 
 		resp := Chirp{
@@ -53,7 +67,7 @@ func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request)
 			CreatedAt: chirp.CreatedAt.Time,
 			UpdatedAt: chirp.UpdatedAt.Time,
 			Body:      chirp.Body,
-			UserID:    params.UserID.String(),
+			UserID:    ID.String(),
 		}
 
 		respondWithJson(w, 201, resp)

@@ -1,7 +1,10 @@
 package auth
 
 import (
+	"encoding/hex"
 	"errors"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -24,11 +27,11 @@ func CheckPasswordHash(hashedPassword, password string) error {
 }
 
 // Creates a JWT for a user only if its credentials are validated.
-func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (string, error) {
+func MakeJWT(userID uuid.UUID, tokenSecret string) (string, error) {
 	claims := jwt.RegisteredClaims{
 		Issuer:    "chirpy",
 		IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
-		ExpiresAt: jwt.NewNumericDate(time.Now().UTC().Add(expiresIn)),
+		ExpiresAt: jwt.NewNumericDate(time.Now().UTC().Add(time.Hour)),
 		Subject:   userID.String(),
 	}
 
@@ -37,7 +40,7 @@ func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (str
 	return token.SignedString([]byte(tokenSecret))
 }
 
-// Valodates the created JWT.
+// Validates the created JWT.
 func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 	var claims jwt.RegisteredClaims
 	token, err := jwt.ParseWithClaims(tokenString, &claims, jwt.Keyfunc(func(token *jwt.Token) (interface{}, error) {
@@ -61,4 +64,26 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 	}
 
 	return userID, nil
+}
+
+func GetBearerToken(headers http.Header) (string, error) {
+	AuthHeader := headers.Get("Authorization")
+	if AuthHeader == "" {
+		return "", errors.New("empty header value")
+	}
+
+	// Split by space and check format
+	parts := strings.SplitN(AuthHeader, " ", 2)
+	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
+		return "", errors.New("invalid authorization header format")
+	}
+
+	return strings.TrimSpace(parts[1]), nil
+
+}
+
+// Creates refresh token.
+func MakeRefreshToken() (string, error) {
+	key := make([]byte, 32)
+	return hex.EncodeToString(key), nil
 }

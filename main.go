@@ -21,6 +21,8 @@ func main() {
 	dbURL := os.Getenv("DB_URL")
 	pf := os.Getenv("PLATFORM")
 
+	secret := os.Getenv("JWTSECRET")
+
 	//Setting up a connection to the database.
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -38,6 +40,7 @@ func main() {
 		fileserverHits: atomic.Int32{},
 		db:             dbQueries,
 		platform:       pf,
+		JWTsecret:      secret,
 	}
 
 	//Serves file from assets directory.
@@ -50,6 +53,8 @@ func main() {
 	mux.HandleFunc("POST /api/chirps", apicfg.handlerCreateChirp)
 	mux.HandleFunc("POST /api/users", apicfg.handlerAcceptEmail)
 	mux.HandleFunc("POST /api/login", apicfg.handlerGetUser)
+	mux.HandleFunc("POST /api/revoke", apicfg.handlerRevokes)
+	mux.HandleFunc("POST /api/refresh", apicfg.handlerRefreshes)
 	mux.HandleFunc("GET /api/chirps", apicfg.handlerGetChirps)
 	mux.HandleFunc("GET /api/chirps/{id}", apicfg.handlerGetChirp)
 
@@ -68,6 +73,7 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	db             *database.Queries
 	platform       string
+	JWTsecret      string
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
