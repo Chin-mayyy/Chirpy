@@ -4,52 +4,31 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"strings"
 )
 
-func respondWithError(w http.ResponseWriter, code int, message string) {
-	type errorMessage struct {
+func respondWithError(w http.ResponseWriter, code int, msg string, err error) {
+	if err != nil {
+		log.Println(err)
+	}
+	if code > 499 {
+		log.Printf("Responding with 5XX error: %s", msg)
+	}
+	type errorResponse struct {
 		Error string `json:"error"`
 	}
-
-	if code >= 400 && code < 500 {
-		mess := errorMessage{
-			Error: message,
-		}
-
-		data, err := json.Marshal(mess)
-		if err != nil {
-			log.Fatalf("error marshaling the error message : %v", err)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(code)
-		w.Write(data)
-	}
+	respondWithJSON(w, code, errorResponse{
+		Error: msg,
+	})
 }
 
-func respondWithJson(w http.ResponseWriter, code int, payload any) {
+func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(payload)
-}
-
-func replaceProfane(body string) string {
-	newBody := []string{}
-
-	oldBody := strings.Split(body, " ")
-	for _, word := range oldBody {
-		switch strings.ToLower(word) {
-		case "kerfuffle":
-			newBody = append(newBody, "****")
-		case "sharbert":
-			newBody = append(newBody, "****")
-		case "fornax":
-			newBody = append(newBody, "****")
-		default:
-			newBody = append(newBody, word)
-		}
+	dat, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("Error marshalling JSON: %s", err)
+		w.WriteHeader(500)
+		return
 	}
-
-	return strings.Join(newBody, " ")
+	w.WriteHeader(code)
+	w.Write(dat)
 }

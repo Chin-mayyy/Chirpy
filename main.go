@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -13,88 +12,77 @@ import (
 	_ "github.com/lib/pq"
 )
 
-func main() {
-	//Getting the evironment variables
-	if err := godotenv.Load(); err != nil {
-		log.Fatal("Error loading .env file")
-	}
-	dbURL := os.Getenv("DB_URL")
-	pf := os.Getenv("PLATFORM")
-
-	secret := os.Getenv("JWTSECRET")
-
-	//Setting up a connection to the database.
-	db, err := sql.Open("postgres", dbURL)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	dbQueries := database.New(db)
-
-	//Creating a new HTTP request multiplexer which allocates URL to the most appropriate handler.
-	mux := http.NewServeMux()
-	const port = "8080"
-	const filepathRoot = "."
-
-	apicfg := apiConfig{
-		fileserverHits: atomic.Int32{},
-		db:             dbQueries,
-		platform:       pf,
-		JWTsecret:      secret,
-	}
-
-	//Serves file from assets directory.
-	fs := http.FileServer(http.Dir("."))
-
-	mux.Handle("/app/", apicfg.middlewareMetricsInc(http.StripPrefix("/app", fs)))
-	mux.HandleFunc("GET /admin/metrics", apicfg.handlerMetrics)
-	mux.HandleFunc("POST /admin/reset", apicfg.handlerReset)
-	mux.HandleFunc("GET /api/healthz", handlerReadiness)
-	mux.HandleFunc("POST /api/chirps", apicfg.handlerCreateChirp)
-	mux.HandleFunc("POST /api/users", apicfg.handlerAcceptEmail)
-	mux.HandleFunc("POST /api/login", apicfg.handlerGetUser)
-	mux.HandleFunc("POST /api/revoke", apicfg.handlerRevokes)
-	mux.HandleFunc("POST /api/refresh", apicfg.handlerRefreshes)
-	mux.HandleFunc("GET /api/chirps", apicfg.handlerGetChirps)
-	mux.HandleFunc("GET /api/chirps/{id}", apicfg.handlerGetChirp)
-
-	fmt.Printf("Serving files from %s on port: %s\n", filepathRoot, port)
-
-	svr := &http.Server{
-		Addr:    ":" + port,
-		Handler: mux,
-	}
-
-	//Starting the server.
-	log.Fatal(svr.ListenAndServe())
-}
-
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	db             *database.Queries
 	platform       string
-	JWTsecret      string
+	jwtSecret      string
+	polkaKey       string
 }
 
-func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("Middleware triggered for:", r.URL.Path)
-		cfg.fileserverHits.Add(1)
-		next.ServeHTTP(w, r)
-	})
-}
+func main() {
+	const filepathRoot = "."
+	const port = "8080"
 
-func (cfg *apiConfig) handlerMetrics(w http.ResponseWriter, r *http.Request) {
-	html := fmt.Sprintf(`<html>
-  		<body>
-    			<h1>Welcome, Chirpy Admin</h1>
-      			<p>Chirpy has been visited %d times!</p>
-        	</body>
-        </html>`, cfg.fileserverHits.Load())
+	godotenv.Load()
+	dbURL := os.Getenv("DB_URL")
+	if dbURL == "" {
+		log.Fatal("DB_URL must be set")
+	}
+	platform := os.Getenv("PLATFORM")
+	if platform == "" {
+		log.Fatal("PLATFORM must be set")
+	}
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		log.Fatal("JWT_SECRET environment variable is not set")
+	}
+	polkaKey := os.Getenv("POLKA_KEY")
+	if polkaKey == "" {
+		log.Fatal("POLKA_KEY environment variable is not set")
+	}
+	dbConn, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatalf("Error opening database: %s", err)
+	}
+	dbQueries := database.New(dbConn)
 
-	w.Header().Add("Content-Type", "text/html")
+	apiCfg := apiConfig{
+		fileserverHits: atomic.Int32{},
+		db:             dbQueries,
+		platform:       platform,
+		jwtSecret:      jwtSecret,
+		polkaKey:       polkaKey,
+	}
 
-	w.WriteHeader(200)
+	mux := http.NewServeMux()
+	fsHandler := apiCfg.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir(filepathRoot))))
+	mux.Handle("/app/", fsHandler)
 
-	w.Write([]byte(html))
+	mux.HandleFunc("GET /api/healthz", handlerReadiness)
+
+	mux.HandleFunc("POST /api/login", apiCfg.handlerLogin)
+	mux.HandleFunc("POST /api/refresh", apiCfg.handlerRefresh)
+	mux.HandleFunc("POST /api/revoke", apiCfg.handlerRevoke)
+
+	mux.HandleFunc("POST /api/users", apiCfg.handlerUsersCreate)
+	mux.HandleFunc("PUT /api/users", apiCfg.handlerUsersUpdate)
+
+	mux.HandleFunc("POST /api/chirps", apiCfg.handlerChirpsCreate)
+	mux.HandleFunc("GET /api/chirps", apiCfg.handlerChirpsRetrieve)
+	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.handlerChirpsGet)
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.handlerChirpsDelete)
+
+	mux.HandleFunc("POST /api/polka/webhooks", apiCfg.handlerWebhooks)
+
+	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
+	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)
+
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: mux,
+	}
+
+	log.Printf("Serving on port: %s\n", port)
+	log.Fatal(srv.ListenAndServe())
 }

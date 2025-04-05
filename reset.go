@@ -8,7 +8,7 @@ func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Forbidden"))
 	} else {
 		w.WriteHeader(200)
-		cfg.db.DeleteUsers(r.Context())
+		cfg.db.Reset(r.Context())
 	}
 	cfg.fileserverHits.Store(0)
 	w.WriteHeader(200)

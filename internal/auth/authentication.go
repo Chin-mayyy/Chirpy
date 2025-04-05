@@ -1,8 +1,10 @@
 package auth
 
 import (
+	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -12,78 +14,111 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// Encrypts a password using bcrypt
+type TokenType string
+
+const (
+	// TokenTypeAccess -
+	TokenTypeAccess TokenType = "chirpy-access"
+)
+
+// ErrNoAuthHeaderIncluded -
+var ErrNoAuthHeaderIncluded = errors.New("no auth header included in request")
+
+// HashPassword -
 func HashPassword(password string) (string, error) {
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	dat, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return "", err
 	}
-	return string(hashedPassword), nil
+	return string(dat), nil
 }
 
-// Checks if a password matches the hashed password
-func CheckPasswordHash(hashedPassword, password string) error {
-	return bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
+// CheckPasswordHash -
+func CheckPasswordHash(password, hash string) error {
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
 }
 
-// Creates a JWT for a user only if its credentials are validated.
-func MakeJWT(userID uuid.UUID, tokenSecret string) (string, error) {
-	claims := jwt.RegisteredClaims{
-		Issuer:    "chirpy",
+// MakeJWT -
+func MakeJWT(
+	userID uuid.UUID,
+	tokenSecret string,
+	expiresIn time.Duration,
+) (string, error) {
+	signingKey := []byte(tokenSecret)
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
+		Issuer:    string(TokenTypeAccess),
 		IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
-		ExpiresAt: jwt.NewNumericDate(time.Now().UTC().Add(time.Hour)),
+		ExpiresAt: jwt.NewNumericDate(time.Now().UTC().Add(expiresIn)),
 		Subject:   userID.String(),
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-
-	return token.SignedString([]byte(tokenSecret))
+	})
+	return token.SignedString(signingKey)
 }
 
-// Validates the created JWT.
+// ValidateJWT -
 func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
-	var claims jwt.RegisteredClaims
-	token, err := jwt.ParseWithClaims(tokenString, &claims, jwt.Keyfunc(func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, errors.New("unexpected signing method")
-		}
-		return []byte(tokenSecret), nil
-	}))
-
+	claimsStruct := jwt.RegisteredClaims{}
+	token, err := jwt.ParseWithClaims(
+		tokenString,
+		&claimsStruct,
+		func(token *jwt.Token) (interface{}, error) { return []byte(tokenSecret), nil },
+	)
 	if err != nil {
-		return uuid.UUID{}, err
+		return uuid.Nil, err
 	}
 
-	if !token.Valid {
-		return uuid.UUID{}, errors.New("invalid token")
-	}
-
-	userID, err := uuid.Parse(claims.Subject)
+	userIDString, err := token.Claims.GetSubject()
 	if err != nil {
-		return uuid.UUID{}, errors.New("invalid user id in token")
+		return uuid.Nil, err
 	}
 
-	return userID, nil
+	issuer, err := token.Claims.GetIssuer()
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if issuer != string(TokenTypeAccess) {
+		return uuid.Nil, errors.New("invalid issuer")
+	}
+
+	id, err := uuid.Parse(userIDString)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("invalid user ID: %w", err)
+	}
+	return id, nil
 }
 
+// GetBearerToken -
 func GetBearerToken(headers http.Header) (string, error) {
-	AuthHeader := headers.Get("Authorization")
-	if AuthHeader == "" {
-		return "", errors.New("empty header value")
+	authHeader := headers.Get("Authorization")
+	if authHeader == "" {
+		return "", ErrNoAuthHeaderIncluded
+	}
+	splitAuth := strings.Split(authHeader, " ")
+	if len(splitAuth) < 2 || splitAuth[0] != "Bearer" {
+		return "", errors.New("malformed authorization header")
 	}
 
-	// Split by space and check format
-	parts := strings.SplitN(AuthHeader, " ", 2)
-	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-		return "", errors.New("invalid authorization header format")
-	}
-
-	return strings.TrimSpace(parts[1]), nil
-
+	return splitAuth[1], nil
 }
 
-// Creates refresh token.
+// MakeRefreshToken makes a random 256 bit token
+// encoded in hex
 func MakeRefreshToken() (string, error) {
-	key := make([]byte, 32)
-	return hex.EncodeToString(key), nil
+	token := make([]byte, 32)
+	_, err := rand.Read(token)
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(token), nil
+}
+
+// Get API key from Authorization header
+func GetAPIKey(headers http.Header) (string, error) {
+	api_key := headers.Get("Authorization")
+	if api_key == "" {
+		return "", errors.New("Missing api key")
+
+	}
+	split_api_key := strings.Split(strings.Trim(api_key, " "), " ")
+
+	return split_api_key[len(split_api_key)-1], nil
 }
