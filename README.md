@@ -45,4 +45,4 @@ Chirpy is a social network similar to Twitter, created to showcase backend engin
 
 Pull requests and issues are welcome. Please fork the repository and submit a pull request with your changes.
 
-*
+
