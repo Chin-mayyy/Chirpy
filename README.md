@@ -24,15 +24,25 @@ Chirpy is a social network similar to Twitter, created to showcase backend engin
    ```bash
    go mod download
    ```
-
-3. **Run the Application**
+3. **Setup the environment variables by creating a .env file in root directory**
    ```bash
-   go run main.go
+      PLATFORM = "dev" / "prod"
+      POLKAKEY = <any random 64 digit string>
+      DB_URL = ""
+      JWT_SECRET = <any random 64 digit string>
+
+4. **Run the Application**
+   ```bash
+   go run .
    ```
 
-4. **API Usage**
+5. **API Usage**
    Chirpy exposes endpoints for authentication, posting, and user interaction. Explore the `main.go` and `/handlers` directory for API documentation and route definitions.
 
+**command to create random 64 digit key**
+```bash
+openssl rand-base64 64
+```
 ## Project Structure
 
 - `main.go`: Application entry point, sets up routes and server.
